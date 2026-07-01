@@ -1,0 +1,6 @@
+{
+  "_说明": "项目级后端覆盖（可选）。账号密码请用 `zentao setup` 写到全局 ~/.claude/zentao.conf，不放这里。",
+  "backend_host": "localhost",
+  "backend_port": 9998,
+  "project_name": "my-project"
+}

@@ -1,0 +1,370 @@
+#!/usr/bin/env bash
+# zentao —— shine-zentao-skill 命令行入口。
+# 子命令：setup | task (add|use|list|search) | sync | log   （stats/query 见 M5）
+# 用法示例：
+#   zentao setup --account me --password 'p' --secret S
+#   zentao task add 77563 shine 全功能扩展 --alias skill
+#   zentao task use skill
+#   zentao sync "1. 改 A\n2. 修 B"
+#   zentao log 1.5 "需求评审会" --date 2026-06-30
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=scripts/lib.sh
+. "$SCRIPT_DIR/lib.sh"
+
+usage() {
+  cat <<'EOF'
+用法: zentao <命令> [参数]
+  setup [--account A --password P] [--host H --port P --secret S --project N]
+  task add <id> [名称...] [--execution E] [--alias A]
+  task use <id|alias>
+  task list
+  task search <关键字>
+  sync "<改动汇总>" [--task <id>]
+  log [工时] "<内容>" [--task <id>] [--date YYYY-MM-DD]
+  stats [task <id>] [--today|--week|--all]
+  query executions | tasks --execution <id> | task <id>
+EOF
+}
+
+# ---------------- setup ----------------
+cmd_setup() {
+  zz_paths; zz_ensure_dirs
+  local account="" password="" host="" port="" secret="" project=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --account) account="$2"; shift 2 ;;
+      --password) password="$2"; shift 2 ;;
+      --host) host="$2"; shift 2 ;;
+      --port) port="$2"; shift 2 ;;
+      --secret) secret="$2"; shift 2 ;;
+      --project) project="$2"; shift 2 ;;
+      *) echo "setup: 未知参数 $1" >&2; shift ;;
+    esac
+  done
+
+  # 写全局 zentao.conf（保留未提供项的旧值）
+  if [ -n "$account" ] || [ -n "$password" ] || [ -n "$secret" ] || [ -n "$host" ] || [ -n "$port" ]; then
+    [ -z "$account" ]  && account="$(zz_flat_str "$GLOBAL_CONF" account)"
+    [ -z "$password" ] && password="$(zz_flat_str "$GLOBAL_CONF" password)"
+    [ -z "$secret" ]   && secret="$(zz_flat_str "$GLOBAL_CONF" webhook_secret)"
+    [ -z "$host" ]     && host="$(zz_flat_str "$GLOBAL_CONF" backend_host)"; [ -z "$host" ] && host="localhost"
+    [ -z "$port" ]     && port="$(zz_flat_num "$GLOBAL_CONF" backend_port)"; [ -z "$port" ] && port="9998"
+    [ -z "$project" ]  && project="$(zz_flat_str "$GLOBAL_CONF" default_project_name)"
+    local a_esc p_esc s_esc pr_esc
+    a_esc="$(zz_json_escape "$account")"; p_esc="$(zz_json_escape "$password")"
+    s_esc="$(zz_json_escape "$secret")"; pr_esc="$(zz_json_escape "$project")"
+    mkdir -p "$(dirname "$GLOBAL_CONF")"
+    printf '{"account":"%s","password":"%s","backend_host":"%s","backend_port":%s,"webhook_secret":"%s","default_project_name":"%s"}\n' \
+      "$a_esc" "$p_esc" "$host" "$port" "$s_esc" "$pr_esc" > "$GLOBAL_CONF"
+    chmod 600 "$GLOBAL_CONF"
+    echo "[setup] 已写入 $GLOBAL_CONF (chmod 600)"
+  fi
+
+  zz_load_config
+  echo "── 当前配置 ──"
+  echo "  账号:     ${CFG_ACCOUNT:-(未配置)}"
+  echo "  后端:     $CFG_HOST:$CFG_PORT"
+  echo "  项目名:   $CFG_PROJECT"
+  echo "  secret:   ${CFG_SECRET:+(已配置)}${CFG_SECRET:-(未配置)}"
+  echo "  任务目录: $TASKS_DIR"
+  echo "  当前任务: $(zz_current_id || true)"
+  cat <<'EOF'
+── 接入 hook（粘进 .claude/settings.json）──
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command",
+      "command": "bash .claude/skills/shine-zentao-sync/scripts/hook_session.sh" }] }],
+    "Stop":        [{ "hooks": [{ "type": "command",
+      "command": "bash .claude/skills/shine-zentao-sync/scripts/hook_stop.sh" }] }]
+  }
+}
+EOF
+}
+
+# ---------------- task ----------------
+cmd_task() {
+  local sub="${1:-}"; [ -n "$sub" ] && shift || { echo "task 需要子命令 add|use|list|search" >&2; return 2; }
+  zz_paths; zz_ensure_dirs
+  case "$sub" in
+    add) task_add "$@" ;;
+    use) task_use "$@" ;;
+    list) task_list "$@" ;;
+    search) task_search "$@" ;;
+    *) echo "task 未知子命令: $sub" >&2; return 2 ;;
+  esac
+}
+
+task_add() {
+  local id="" execution="" alias="" name=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --execution) execution="$2"; shift 2 ;;
+      --alias) alias="$2"; shift 2 ;;
+      --*) echo "task add: 未知参数 $1" >&2; shift ;;
+      *)
+        if [ -z "$id" ]; then id="$1"
+        else name="${name}${name:+ }$1"; fi
+        shift ;;
+    esac
+  done
+  [ -z "$id" ] && { echo "task add 需要 <id>" >&2; return 2; }
+  echo "$id" | grep -qE '^[0-9]+$' || { echo "task add: id 必须是数字" >&2; return 2; }
+  local f; f="$(zz_task_file "$id")"
+  local n_esc a_esc
+  n_esc="$(zz_json_escape "$name")"; a_esc="$(zz_json_escape "$alias")"
+  printf '{"id":%s,"name":"%s","execution_id":%s,"alias":"%s","added_ts":%s}\n' \
+    "$id" "$n_esc" "${execution:-0}" "$a_esc" "$(date +%s)" > "$f"
+  # 首个任务自动设为 current
+  if [ ! -f "$CURRENT_FILE" ] || [ -z "$(cat "$CURRENT_FILE" 2>/dev/null | tr -d '[:space:]')" ]; then
+    zz_set_current "$id"
+  fi
+  echo "[task] 已添加 #$id ${name:-(无名称)} alias=${alias:-(无)} → $f"
+  [ "$(cat "$CURRENT_FILE" 2>/dev/null | tr -d '[:space:]')" = "$id" ] && echo "[task] 当前任务设为 #$id"
+}
+
+task_use() {
+  local target="${1:-}"; [ -n "$target" ] || { echo "task use 需要 <id|alias>" >&2; return 2; }
+  zz_paths
+  local id=""
+  if echo "$target" | grep -qE '^[0-9]+$'; then
+    id="$target"
+    [ -f "$(zz_task_file "$id")" ] || { echo "任务 #$id 不存在，先 task add" >&2; return 1; }
+  else
+    local f
+    for f in "$TASKS_DIR"/*.json; do
+      [ -f "$f" ] || continue
+      if [ "$(zz_flat_str "$f" alias)" = "$target" ]; then id="$(zz_flat_num "$f" id)"; break; fi
+    done
+    [ -z "$id" ] && { echo "找不到 alias=$target 的任务" >&2; return 1; }
+  fi
+  zz_set_current "$id"
+  echo "[task] 当前任务 → #$id ($(zz_flat_str "$(zz_task_file "$id")" name))"
+}
+
+task_list() {
+  zz_paths
+  local f id="" name="" alias="" lrd="" cur
+  cur="$(zz_current_id || true)"
+  printf '%-10s %-8s %-22s %-12s %s\n' "ID" "ALIAS" "名称" "上次上报" "当前"
+  for f in "$TASKS_DIR"/*.json; do
+    [ -f "$f" ] || continue
+    id="$(zz_flat_num "$f" id)"; name="$(zz_flat_str "$f" name)"
+    alias="$(zz_flat_str "$f" alias)"; lrd="$(zz_flat_str "$f" last_report_date)"
+    [ "$id" = "$cur" ] && local mark="*" || local mark=""
+    printf '%-10s %-8s %-22s %-12s %s\n' "#$id" "${alias:--}" "${name:--}" "${lrd:--}" "$mark"
+  done
+  [ -z "$id" ] && echo "(暂无任务，用 zentao task add <id> 添加)"
+}
+
+task_search() {
+  local kw="${1:-}"; zz_paths
+  [ -z "$kw" ] && { echo "task search 需要 <关键字>" >&2; return 2; }
+  echo "(本地任务中搜索；远端禅道搜索见 M5 query)"
+  local f id name
+  for f in "$TASKS_DIR"/*.json; do
+    [ -f "$f" ] || continue
+    id="$(zz_flat_num "$f" id)"; name="$(zz_flat_str "$f" name)"
+    echo "#$id $name" | grep -i "$kw" && :
+  done
+}
+
+# ---------------- 提交：sync / log ----------------
+# 解析 --task，返回任务 ID（current 或指定），失败退出。
+resolve_task() {
+  local task_id="" i=0 newargs=()
+  ZZ_LINES_INS=0; ZZ_LINES_DEL=0; ZZ_LINES_FILES=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --task) task_id="$2"; shift 2 ;;
+      --lines)  # $2 = "ins del files"（commit 时由 commit_sync.sh 采集）
+        local arr; arr=($2)
+        ZZ_LINES_INS="${arr[0]:-0}"; ZZ_LINES_DEL="${arr[1]:-0}"; ZZ_LINES_FILES="${arr[2]:-0}"
+        shift 2 ;;
+      *) newargs[i++]="$1"; shift ;;
+    esac
+  done
+  set -- "${newargs[@]}"
+  ZZ_RESOLVED_ARGS=("$@")
+  if [ -z "$task_id" ]; then
+    task_id="$(zz_current_id || true)"
+    # 兼容回退：无 current 时用 ZENTAO_TASK_ID 环境变量
+    [ -z "$task_id" ] && task_id="${ZENTAO_TASK_ID:-}"
+    [ -z "$task_id" ] && { echo "无当前任务，先用 zentao task use 或 --task <id>" >&2; return 1; }
+  fi
+  if [ ! -f "$(zz_task_file "$task_id")" ]; then
+    # 兼容：任务未注册则按 id 自动建一个（无名称），保证旧用户/旧调用不崩
+    printf '{"id":%s,"name":"","execution_id":0,"alias":"","added_ts":%s}\n' "$task_id" "$(date +%s)" > "$(zz_task_file "$task_id")"
+    [ -f "$CURRENT_FILE" ] || zz_set_current "$task_id"
+    echo "[sync] 自动注册任务 #$task_id（建议用 zentao task add 补名称/alias）" >&2
+  fi
+  ZZ_TASK_ID="$task_id"
+}
+
+# 构造 webhook body 到 stdout：emit_body <task_id> <hours> <summary> [work_date]
+emit_body() {
+  local id="$1" hours="$2" summary="$3" wdate="${4:-}"
+  local name tname_esc sum_esc
+  name="$(zz_task "$id" name)"
+  tname_esc="$(zz_json_escape "#${id}-${name}")"
+  sum_esc="$(zz_json_escape "$summary")"
+  local acct_esc pw_esc proj_esc
+  acct_esc="$(zz_json_escape "$CFG_ACCOUNT")"; pw_esc="$(zz_json_escape "$CFG_PASSWORD")"
+  proj_esc="$(zz_json_escape "$CFG_PROJECT")"
+  if [ -n "$wdate" ]; then
+    printf '{"project_name":"%s","username":"%s","task_name":"%s","status":"sync","consumed_hours":%s,"comment":"%s","work_date":"%s","zentao_account":"%s","zentao_password":"%s"}' \
+      "$proj_esc" "$acct_esc" "$tname_esc" "$hours" "$sum_esc" "$wdate" "$acct_esc" "$pw_esc"
+  else
+    printf '{"project_name":"%s","username":"%s","task_name":"%s","status":"sync","consumed_hours":%s,"comment":"%s","zentao_account":"%s","zentao_password":"%s"}' \
+      "$proj_esc" "$acct_esc" "$tname_esc" "$hours" "$sum_esc" "$acct_esc" "$pw_esc"
+  fi
+}
+
+cmd_sync() {
+  zz_paths; zz_load_config
+  [ -z "$CFG_ACCOUNT" ] || [ -z "$CFG_PASSWORD" ] && { echo "未配置禅道账号/密码，先 zentao setup" >&2; return 1; }
+  resolve_task "$@" || return 1
+  set -- "${ZZ_RESOLVED_ARGS[@]}"
+  local summary="$*"
+  [ -z "$summary" ] && { echo "sync 需要 <改动汇总>" >&2; return 2; }
+  local id="$ZZ_TASK_ID"
+  local last_ts last_date hours code
+  last_ts="$(zz_task "$id" last_report_ts)"; last_date="$(zz_task "$id" last_report_date)"
+  hours="$(zz_compute_hours "$last_ts" "$last_date" "")"
+  local body_file; body_file="$(mktemp)"
+  emit_body "$id" "$hours" "$summary" > "$body_file"
+  code="$(zz_webhook_post "$body_file")"
+  rm -f "$body_file"
+  # 行数（由 commit_sync.sh 经 --lines 传入；手动 sync 为 0）
+  zz_append_entry "$id" "sync" "$hours" 0 0 0 0 "$ZZ_LINES_INS" "$ZZ_LINES_DEL" "$ZZ_LINES_FILES" "$summary"
+  zz_touch_task_anchor "$id"
+  if [ "$code" = "200" ]; then
+    printf '[sync] 已上报禅道 #%s: %sh（HTTP 200）\n' "$id" "$hours"
+  else
+    printf '[sync] 上报失败（不阻塞）: HTTP %s；本地已记录\n' "${code:-000}"
+  fi
+}
+
+cmd_log() {
+  zz_paths; zz_load_config
+  [ -z "$CFG_ACCOUNT" ] || [ -z "$CFG_PASSWORD" ] && { echo "未配置禅道账号/密码，先 zentao setup" >&2; return 1; }
+  resolve_task "$@" || return 1
+  set -- "${ZZ_RESOLVED_ARGS[@]}"
+  local wdate="" hours_explicit="" summary="" i=0 parts=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --date) wdate="$2"; shift 2 ;;
+      *)
+        if [ -z "$hours_explicit" ] && echo "$1" | grep -qE '^[0-9]+(\.[0-9]+)?$'; then
+          hours_explicit="$1"
+        else
+          parts[i++]="$1"
+        fi
+        shift ;;
+    esac
+  done
+  summary="${parts[*]}"
+  [ -z "$summary" ] && { echo "log 需要 <内容>" >&2; return 2; }
+  local id="$ZZ_TASK_ID"
+  local last_ts last_date hours code
+  last_ts="$(zz_task "$id" last_report_ts)"; last_date="$(zz_task "$id" last_report_date)"
+  hours="$(zz_compute_hours "$last_ts" "$last_date" "$hours_explicit")"
+  local body_file; body_file="$(mktemp)"
+  emit_body "$id" "$hours" "$summary" "$wdate" > "$body_file"
+  code="$(zz_webhook_post "$body_file")"
+  rm -f "$body_file"
+  zz_append_entry "$id" "manual" "$hours" 0 0 0 0 0 0 0 "$summary"
+  # 显式工时不推进锚点（非墙钟工作）；计算工时才推进
+  [ -z "$hours_explicit" ] && zz_touch_task_anchor "$id"
+  if [ "$code" = "200" ]; then
+    printf '[log] 已记录 #%s: %sh（HTTP 200）%s\n' "$id" "$hours" "${wdate:+@$wdate}"
+  else
+    printf '[log] 上报失败（不阻塞）: HTTP %s；本地已记录\n' "${code:-000}"
+  fi
+}
+
+# ---------------- 查询后端（executions / tasks / task）----------------
+cmd_query() {
+  zz_paths; zz_load_config
+  [ -z "$CFG_ACCOUNT" ] || [ -z "$CFG_PASSWORD" ] && { echo "未配置禅道账号/密码，先 zentao setup" >&2; return 1; }
+  local sub="${1:-}"; [ -n "$sub" ] && shift || { echo "query: executions | tasks --execution <id> | task <id>" >&2; return 2; }
+  case "$sub" in
+    executions) zz_signed_get /api/executions | zz_pretty ;;
+    tasks)
+      local eid=""; [ "${1:-}" = "--execution" ] && eid="${2:-}"
+      [ -z "$eid" ] && { echo "query tasks 需要 --execution <id>" >&2; return 2; }
+      zz_signed_get /api/tasks "execution_id=$eid" | zz_pretty ;;
+    task)
+      [ -z "${1:-}" ] && { echo "query task 需要 <id>" >&2; return 2; }
+      zz_signed_get "/api/tasks/$1" | zz_pretty ;;
+    *) echo "query 未知子命令: $sub" >&2; return 2 ;;
+  esac
+}
+
+# ---------------- 统计回显（聚合 entries.jsonl）----------------
+cmd_stats() {
+  zz_paths
+  [ -f "$ENTRIES_FILE" ] || { echo "(暂无记录)"; return 0; }
+  local filter_task="" range="today"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      task) filter_task="$2"; shift 2 ;;
+      all|--all) range="all"; shift ;;
+      week|--week) range="week"; shift ;;
+      today|--today) range="today"; shift ;;
+      *) shift ;;
+    esac
+  done
+  local today weekago names="" f tid nm
+  today=$(date '+%Y-%m-%d')
+  weekago=$(date -d '7 days ago' '+%Y-%m-%d' 2>/dev/null || date '+%Y-%m-%d')
+  for f in "$TASKS_DIR"/*.json; do
+    [ -f "$f" ] || continue
+    tid=$(zz_flat_num "$f" id); nm=$(zz_flat_str "$f" name)
+    names="$names$tid=$nm;"
+  done
+  echo "范围: $range  范围内任务统计（token/工时/代码行）"
+  awk -v today="$today" -v weekago="$weekago" -v range="$range" -v ftask="$filter_task" -v names="$names" '
+    function num(k,  m){ if(match($0,"\""k"\":[-0-9.]+")){m=substr($0,RSTART,RLENGTH); sub(/^.*:/,"",m); return m+0} return 0 }
+    function strf(k,  re,m){ re="\""  k  "\":\""  "[^\"]*"  "\""; if(match($0,re)){m=substr($0,RSTART,RLENGTH); sub(/^[^:]*:/,"",m); gsub(/"/,"",m); return m} return "" }
+    function nameof(t,  n,i,p,a){ n=split(names,a,";"); for(i=1;i<=n;i++){ split(a[i],p,"="); if(p[1]==t) return p[2] } return "" }
+    {
+      d=strf("date"); tid=num("task_id")
+      if (ftask!="" && tid!=ftask+0) next
+      if (range=="today" && d!=today) next
+      if (range=="week" && (d<weekago || d>today)) next
+      hrs[tid]+=num("hours"); intok[tid]+=num("in_tok"); outtok[tid]+=num("out_tok")
+      cct[tid]+=num("cache_create_tok"); crt[tid]+=num("cache_read_tok")
+      ins[tid]+=num("ins"); del[tid]+=num("del"); files[tid]+=num("files")
+      if(strf("source")=="sync") commits[tid]++
+      seen[tid]=1
+    }
+    END{
+      if(length(seen)==0){ print "(无匹配记录)"; exit }
+      printf "%-8s %-14s %7s %8s %8s %9s %6s %6s %5s %5s\n","任务","名称","工时","input","output","cache","增行","删行","文件","提交"
+      for(t in seen){
+        cache=cct[t]+crt[t]
+        printf "%-8s %-14s %7.2f %8d %8d %9d %6d %6d %5d %5d\n", t, nameof(t), hrs[t], intok[t], outtok[t], cache, ins[t], del[t], files[t], commits[t]+0
+        th+=hrs[t];ti+=intok[t];to+=outtok[t];tc+=cache;tni+=ins[t];tnd+=del[t];tnf+=files[t];tcm+=commits[t]+0
+      }
+      printf "%-8s %-14s %7.2f %8d %8d %9d %6d %6d %5d %5d\n","合计","",th,ti,to,tc,tni,tnd,tnf,tcm
+    }' "$ENTRIES_FILE"
+}
+
+# ---------------- 入口 ----------------
+main() {
+  local cmd="${1:-}"; [ -n "$cmd" ] && shift || { usage; return 0; }
+  case "$cmd" in
+    setup) cmd_setup "$@" ;;
+    task) cmd_task "$@" ;;
+    sync) cmd_sync "$@" ;;
+    log) cmd_log "$@" ;;
+    stats) cmd_stats "$@" ;;
+    query) cmd_query "$@" ;;
+    -h|--help|help) usage ;;
+    *) echo "未知命令: $cmd" >&2; usage; return 2 ;;
+  esac
+}
+
+main "$@"

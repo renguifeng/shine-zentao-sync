@@ -1,0 +1,25 @@
+# 依赖 / 缓存
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# skills 安装锁（消费者侧生成）
+skills-lock.json
+
+# 消费者运行时本地数据（含工时/token/代码行统计，每人本地）：
+#   .claude/zentao/            （tasks/、sessions/、entries.jsonl、current、project.conf）
+#   ~/.claude/zentao.conf       （全局账号密码，chmod 600）
+# 本 skill 源仓库本身不含这些；此处仅作提示。
+
+# 系统 / 编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# 注意：以下是「消费者项目」应忽略的本地文件（含密码 / 本地状态，不进 git）。
+# 本 skill 源仓库本身不含这些文件；此处仅作提示，方便整目录参考。
+#   .claude/settings.local.json
+#   .claude/.zentao_session.json
