@@ -28,9 +28,16 @@ npx skills update                                   # 更新已装 skill
 #   npx skills add https://github.com/renguifeng/shine-zentao-sync.git
 ```
 
-安装位置取决于方式：`skills add` 默认装到 `.agents/skills/shine-zentao-sync/`（或按 `--agent`），
-手动拷贝可放 `.claude/skills/`。跑 `npx skills list` 确认实际路径——settings.json 里的 hook
-命令与流程示例里的脚本路径都以该路径为准（脚本靠自身位置定位 `lib.sh`，放哪都能跑）。
+**装到哪儿、要不要带 `--agent`，取决于你在哪儿运行 `skills add`**（CLI 启动时会调 `detectAgent()` 自动探测当前是否在某个编码 agent 内）：
+
+- **在 Claude Code 里跑**（`!` 前缀或 Claude Code 自带的终端）：探测到 `CLAUDECODE` 环境变量，**免 `--agent`、免交互**，只装给 Claude Code → `.claude/skills/shine-zentao-sync/`。Cursor / Codex / Copilot 等同理，各自探测、各自装。
+- **在普通 CMD / PowerShell 里跑**：探测不到 agent，会弹交互选择器（默认勾选一组共享 `.agents/skills/` 的 Universal agent）。只想装 Claude Code 时显式指定：
+  ```bash
+  npx skills add renguifeng/shine-zentao-sync --agent claude-code
+  ```
+- **用户级（全局）**：任一方式加 `-g` → `~/.claude/skills/`。
+
+> 装完跑 `npx skills list` 确认实际路径——settings.json 里的 hook 命令、流程示例里的脚本路径都以该路径为准（脚本靠自身位置定位 `lib.sh`，放哪都能跑）。
 
 ## 配置（3 步）
 
