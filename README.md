@@ -18,10 +18,15 @@
 ## 安装
 
 ```bash
-npx skills add <owner>/shine-zentao-sync        # 装到项目 .claude/skills/
-npx skills add -g <owner>/shine-zentao-sync     # 装到用户级 ~/.claude/skills/
-npx skills update                                # 更新
+# 本 skill 托管在 Gitea，需用完整 URL（skills CLI 也支持 GitHub/GitLab 的 owner/repo）：
+npx skills add http://<gitea-host>/AI/shine-zentao-sync.git
+npx skills add -g http://<gitea-host>/AI/shine-zentao-sync.git   # 用户级
+npx skills update                                                  # 更新
 ```
+
+安装位置取决于方式：`skills add` 默认装到 `.agents/skills/shine-zentao-sync/`（或按 `--agent`），
+手动拷贝可放 `.claude/skills/`。跑 `npx skills list` 确认实际路径——settings.json 里的 hook
+命令与流程示例里的脚本路径都以该路径为准（脚本靠自身位置定位 `lib.sh`，放哪都能跑）。
 
 ## 配置（3 步）
 
