@@ -1,5 +1,7 @@
 # shine-zentao-sync
 
+[![skills.sh](https://skills.sh/b/renguifeng/shine-zentao-sync)](https://skills.sh/renguifeng/shine-zentao-sync)
+
 一个 [Claude Code Skill](https://skills.sh/)：在「提交推送代码」时自动上报禅道工时，支持手动记非编码工时（会议/调研/测试）、多任务切换、token 与代码行的**本地统计**及回显、跨天汇总。后端走 [Claude2Zen](https://github.com/) 服务。
 
 纯 shell（bash + curl + openssl + git + awk），零 Python 依赖。
@@ -18,10 +20,12 @@
 ## 安装
 
 ```bash
-# 本 skill 托管在 Gitea，需用完整 URL（skills CLI 也支持 GitHub/GitLab 的 owner/repo）：
-npx skills add http://<gitea-host>/AI/shine-zentao-sync.git
-npx skills add -g http://<gitea-host>/AI/shine-zentao-sync.git   # 用户级
-npx skills update                                                  # 更新
+# 标准安装（skills.sh 生态，GitHub owner/repo 短链）：
+npx skills add renguifeng/shine-zentao-sync
+npx skills add -g renguifeng/shine-zentao-sync     # 用户级（~/.claude/skills/）
+npx skills update                                   # 更新已装 skill
+# 也支持任意完整 git URL（GitHub/GitLab/Gitea 等）：
+#   npx skills add https://github.com/renguifeng/shine-zentao-sync.git
 ```
 
 安装位置取决于方式：`skills add` 默认装到 `.agents/skills/shine-zentao-sync/`（或按 `--agent`），

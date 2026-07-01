@@ -133,9 +133,9 @@ zentao query executions | tasks --execution <id> | task <id>
 ## 安装 / 更新
 
 ```bash
-npx skills add <owner>/shine-zentao-sync        # 装到项目 .claude/skills/
-npx skills add -g <owner>/shine-zentao-sync     # 装到用户级 ~/.claude/skills/
-npx skills update                                # 更新已装 skill
+npx skills add renguifeng/shine-zentao-sync      # 默认装到 .agents/skills/（--agent 可指定）
+npx skills add -g renguifeng/shine-zentao-sync   # 装到用户级 ~/.claude/skills/
+npx skills update                                 # 更新已装 skill
 ```
 
 详见 [README.md](README.md)。
