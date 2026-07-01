@@ -138,4 +138,4 @@ npx skills add -g renguifeng/shine-zentao-sync   # 装到用户级 ~/.claude/ski
 npx skills update                                 # 更新已装 skill
 ```
 
-详见 [README.md](README.md)。
+详见 [README.md](../../README.md)。

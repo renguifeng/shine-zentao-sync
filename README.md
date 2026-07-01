@@ -40,10 +40,10 @@ npx skills update                                   # 更新已装 skill
                 [--host localhost --port 9998 --project <项目名>]
    ```
    （`zentao` 在 `.claude/skills/shine-zentao-sync/scripts/zentao`。）
-2. **接 hook**：把 SessionStart + Stop hook 片段粘进 `.claude/settings.json`（见 [`SKILL.md`](SKILL.md#流程-d配置引导首次)）。
+2. **接 hook**：把 SessionStart + Stop hook 片段粘进 `.claude/settings.json`（见 [`SKILL.md`](skills/shine-zentao-sync/SKILL.md#流程-d配置引导首次)）。
 3. **重开会话**：env 在会话启动时加载。
 
-> 项目级后端覆盖可选：`$PROJECT/.claude/zentao/project.conf`（模板见 [`templates/project.conf.example`](templates/project.conf.example)）。
+> 项目级后端覆盖可选：`$PROJECT/.claude/zentao/project.conf`（模板见 [`templates/project.conf.example`](skills/shine-zentao-sync/templates/project.conf.example)）。
 > 也兼容旧 `.claude/settings.local.json` 的 env（`ZENTAO_*`/`WEBHOOK_*`）与项目根 `.env`。
 
 ## 用法
@@ -61,7 +61,7 @@ zentao stats
 zentao query tasks --execution 1234
 ```
 
-完整流程、触发词、命令速查见 [`SKILL.md`](SKILL.md)。
+完整流程、触发词、命令速查见 [`SKILL.md`](skills/shine-zentao-sync/SKILL.md)。
 
 ## 数据口径
 
@@ -78,11 +78,18 @@ zentao query tasks --execution 1234
 ## 结构
 
 ```
-scripts/
-  lib.sh             公共库（配置/路径/JSON/HMAC/webhook/token/diff/聚合）
-  zentao             CLI 入口（setup/task/sync/log/stats/query）
-  hook_session.sh    SessionStart：初始化 store + 迁移旧状态
-  hook_stop.sh       Stop：增量采集 token
-  commit_sync.sh     commit 入口（采集行数 → zentao sync）
-SKILL.md / README.md / templates/ / .gitignore
+skills/shine-zentao-sync/          ← skill 本体（skills add 会把这个子目录整目录安装）
+  scripts/
+    lib.sh             公共库（配置/路径/JSON/HMAC/webhook/token/diff/聚合）
+    zentao             CLI 入口（setup/task/sync/log/stats/query）
+    hook_session.sh    SessionStart：初始化 store + 迁移旧状态
+    hook_stop.sh       Stop：增量采集 token
+    commit_sync.sh     commit 入口（采集行数 → zentao sync）
+  templates/           project.conf.example 等模板
+  SKILL.md
+README.md / .gitignore             ← 仓库根
 ```
+
+> ⚠️ `SKILL.md` 必须放在 `skills/shine-zentao-sync/` 子目录下，**不能放仓库根**。
+> 否则 `npx skills add`（git 克隆路径）只会安装 SKILL.md，漏掉 `scripts/`、`templates/`。
+> 运行时安装路径仍是 `.claude/skills/shine-zentao-sync/`，不受源仓库结构影响；脚本靠自身位置定位 `lib.sh`。
