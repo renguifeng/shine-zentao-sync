@@ -38,4 +38,15 @@ for f in "$SESSIONS_DIR"/*.json; do
   if [ -n "$t" ] && [ "$t" -lt "$cutoff" ] 2>/dev/null; then rm -f "$f"; fi
 done
 
+# 自动同步 /zentao slash command 到用户级（幂等；不改任何环境变量，仅写 ~/.claude/commands/）。
+# 装完 skill、重开会话后 /zentao 即可直接用，无需手建、无需改 PATH。
+if [ -n "${HOME:-}" ]; then
+  cmd_src="$SCRIPT_DIR/../templates/zentao.md"
+  cmd_dst="$HOME/.claude/commands/zentao.md"
+  if [ -f "$cmd_src" ] && { [ ! -f "$cmd_dst" ] || ! cmp -s "$cmd_src" "$cmd_dst"; }; then
+    mkdir -p "$(dirname "$cmd_dst")" && cp "$cmd_src" "$cmd_dst"
+    echo "[hook] 已安装 /zentao 命令 → $cmd_dst"
+  fi
+fi
+
 echo "[hook] session ready: store=$STORE_DIR current=$(zz_current_id 2>/dev/null || echo -)"

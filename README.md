@@ -55,6 +55,10 @@ npx skills update                                   # 更新已装 skill
 
 ## 用法
 
+> **在 Claude Code 里直接敲 `/zentao <子命令>` 即可**——SessionStart hook 会自动把 `/zentao`
+> 斜杠命令同步到 `~/.claude/commands/`（装完 skill、重开会话后生效，**无需改任何环境变量**）。
+> 下文 `zentao xxx` 简写在 Claude 会话内等价于 `/zentao xxx`；在普通终端则需用全路径调用。
+
 ```bash
 zentao task add 77563 shine 扩展 --alias skill
 zentao task use skill
